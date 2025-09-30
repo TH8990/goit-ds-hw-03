@@ -8,19 +8,32 @@ COLLECTION_NAME = "cats"
 
 
 def get_collection():
-    """Створює та повертає об'єкт колекції MongoDB."""
+    """Створює об'єкт клієнта та колекції. Повертає (client, collection) або (None, None)."""
+    # Додано таймаут для підключення
+    TIMEOUT = 5000 # 5 секунд    
+    
     try:
-        client = MongoClient(MONGO_URI)
-        # Перевірка підключення
+        # Додано таймаут serverSelectionTimeoutMS
+        client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=TIMEOUT)
+        
+        # Перевірка підключення (буде викинуто ConnectionFailure, якщо таймаут минув)
         client.admin.command('ping')
+        
         db = client[DB_NAME]
-        return db[COLLECTION_NAME]
+        collection = db[COLLECTION_NAME]
+        
+        return client, collection
+        
     except ConnectionFailure as e:
-        print(f"Помилка підключення до MongoDB: {e}")
-        return None
+        print(f"Помилка підключення до MongoDB (ConnectionFailure): {e}")
+        return None, None
     except OperationFailure as e:
-        print(f"Помилка операції з MongoDB: {e}")
-        return None
+        # OperationFailure може виникнути, наприклад, через bad auth
+        print(f"Помилка операції з MongoDB (OperationFailure): {e}")
+        return None, None
+    except Exception as e:
+        print(f"Невідома помилка при підключенні: {e}")
+        return None, None
 
 # --- CRUD операції ---
 
@@ -48,9 +61,11 @@ def read_all_cats(collection):
     """Виводить всі записи з колекції."""
     print("\n--- Список усіх котів ---")
     try:
-        cats = collection.find({})
-        if cats:
-            for cat in cats:
+        # Використовуємо count_documents({}) для коректної перевірки на порожню колекцію
+        if collection.count_documents({}) > 0:
+            for cat in collection.find({}):
+                # Для красивого виведення ObjectId 
+                cat['_id'] = str(cat['_id']) 
                 print(cat)
         else:
             print("Колекція порожня.")
@@ -63,6 +78,7 @@ def read_cat_by_name(collection, name):
     try:
         cat = collection.find_one({"name": name})
         if cat:
+            cat['_id'] = str(cat['_id'])
             print(cat)
         else:
             print(f"Кіт з ім'ям '{name}' не знайдений.")
@@ -124,31 +140,40 @@ def delete_all_cats(collection):
 
 # --- Запуск скрипта ---
 if __name__ == "__main__":
-    cats_collection = get_collection()
+    # Отримуємо клієнт і колекцію
+    client, cats_collection = get_collection()
+    
     if cats_collection is not None:
-        # Приклад використання функцій
+        try:
+            # Приклад використання функцій
         
-        # Додавання тестових даних (якщо колекція порожня)
-        if not cats_collection.find_one():
-            print("Колекція порожня. Додаю тестові дані.")
-            create_cat(cats_collection, "barsik", 3, ["ходить в капці", "дає себе гладити", "рудий"])
-            create_cat(cats_collection, "lapa", 5, ["любить спати", "не боїться собак"])
-            create_cat(cats_collection, "marta", 2, ["грайлива", "любить молоко"])
+            # Додавання тестових даних (якщо колекція порожня)
+            # Використовуємо count_documents() для коректної перевірки
+            if cats_collection.count_documents({}) == 0:
+                print("Колекція порожня. Додаю тестові дані.")
+                create_cat(cats_collection, "barsik", 3, ["ходить в капці", "дає себе гладити", "рудий"])
+                create_cat(cats_collection, "lapa", 5, ["любить спати", "не боїться собак"])
+                create_cat(cats_collection, "marta", 2, ["грайлива", "любить молоко"])
 
-        # Завдання: Читання
-        read_all_cats(cats_collection)
-        read_cat_by_name(cats_collection, "barsik")
-        read_cat_by_name(cats_collection, "non_existent_cat")
+            # Завдання: Читання
+            read_all_cats(cats_collection)
+            read_cat_by_name(cats_collection, "barsik")
+            read_cat_by_name(cats_collection, "non_existent_cat")
 
-        # Завдання: Оновлення
-        update_cat_age_by_name(cats_collection, "barsik", 4)
-        add_cat_feature_by_name(cats_collection, "lapa", "не любить воду")
-        read_all_cats(cats_collection) # Перевірка змін
+            # Завдання: Оновлення
+            update_cat_age_by_name(cats_collection, "barsik", 4)
+            add_cat_feature_by_name(cats_collection, "lapa", "не любить воду")
+            read_all_cats(cats_collection) # Перевірка змін
 
-        # Завдання: Видалення
-        delete_cat_by_name(cats_collection, "marta")
-        read_all_cats(cats_collection) # Перевірка видалення
+            # Завдання: Видалення
+            delete_cat_by_name(cats_collection, "marta")
+            read_all_cats(cats_collection) # Перевірка видалення
         
-        # Завдання: Видалення всіх
-        # delete_all_cats(cats_collection)
-        # read_all_cats(cats_collection) # Перевірка після повного видалення
+            # Завдання: Видалення всіх
+            # delete_all_cats(cats_collection)
+            # read_all_cats(cats_collection) # Перевірка після повного видалення
+    
+        finally:
+            if client:
+                client.close()
+                print("\nЗ'єднання з MongoDB закрито.")
